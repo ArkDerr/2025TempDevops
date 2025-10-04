@@ -1,0 +1,51 @@
+name: CI - Build, Test & JaCoCo # Nombre de la accion
+
+on:
+  push:
+    branches: [ "**" ] # En cualquier push a cualquier rama ("**" significa todas)
+
+permissions: #Permisos mínimos para que el job pueda leer el repo. Seguridad básica.
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  build-test-coverage: # Nombre del job
+    runs-on: ubuntu-latest # Corre en una máquina virtual Ubuntu que GitHub te da.
+    timeout-minutes: 30 # si tarda más, se cancela automáticamente
+
+    steps:
+      - name: Checkout # Clona tu repositorio dentro de la VM. Obligatorio para poder compilar/testear tu código.
+        uses: actions/checkout@v4 
+
+      - name: Setup JDK 21 # Instala Java 21 en el runner (en este caso ubuntu-latest).
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      # Ejecuta tus tests con cobertura. Si en el POM tienes el jacoco:check con mínimos,
+      # este paso FALLA el job si no se cumple el umbral.
+      - name: Build & Test (with coverage)
+        run: mvn -B -U clean verify
+
+      # Sube el reporte de cobertura como artefacto descargable desde la ejecución
+      - name: Upload JaCoCo report
+        if: always()   # lo sube aunque el verify falle, para poder revisar
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: |
+            **/target/site/jacoco/**
+            **/target/site/jacoco-aggregate/**
+          if-no-files-found: ignore
+
+      # (Opcional) Publica resultados JUnit en la pestaña de Checks
+      - name: Publish JUnit test results
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: '**/target/surefire-reports/*.xml'
+          check_name: 'JUnit Results'
+          detailed_summary: true
