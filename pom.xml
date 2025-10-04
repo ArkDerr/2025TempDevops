@@ -123,28 +123,55 @@
 				</configuration>
 			</plugin>
 
-			<!-- Plugin de pruebas unitarias -->
-            <plugin>
-            <groupId>org.jacoco</groupId>
-            <artifactId>jacoco-maven-plugin</artifactId>
-            <version>0.8.13</version>
-            <executions>
-                <!-- Se ejecuta después de "mvn test" -->
-                <execution>
-                <goals>
-                    <goal>prepare-agent</goal>
-                </goals>
-                </execution>
-                <!-- Genera reporte en "mvn verify" -->
-                <execution>
-                <id>report</id>
-                <phase>verify</phase>
-                <goals>
-                    <goal>report</goal>
-                </goals>
-                </execution>
-            </executions>
-            </plugin>
+			<plugin>
+				<groupId>org.jacoco</groupId>
+				<artifactId>jacoco-maven-plugin</artifactId>
+				<version>0.8.13</version>
+				<executions>
+					<!-- Agente que recolecta cobertura -->
+					<execution>
+					<goals>
+						<goal>prepare-agent</goal>
+					</goals>
+					</execution>
+
+					<!-- Generar reporte -->
+					<execution>
+					<id>report</id>
+					<phase>verify</phase>
+					<goals>
+						<goal>report</goal>
+					</goals>
+					</execution>
+
+					<!-- Validar umbrales -->
+					<execution>
+					<id>jacoco-check</id>
+					<goals>
+						<goal>check</goal>
+					</goals>
+					<configuration>
+						<rules>
+						<rule>
+							<!-- Aplica a todas las clases -->
+							<element>BUNDLE</element>
+							<limits>
+							<limit>
+								<!-- Tipo de cobertura: LINE, BRANCH, METHOD, CLASS -->
+								<counter>LINE</counter>
+								<!-- Tipos de medida: COVEREDRATIO, TOTALCOUNT -->
+								<value>COVEREDRATIO</value>
+								<!-- Umbral mínimo (0.80 = 80%) -->
+								<minimum>0.90</minimum>
+							</limit>
+							</limits>
+						</rule>
+						</rules>
+					</configuration>
+					</execution>
+				</executions>
+				</plugin>
+
 
 		</plugins>
 	</build>
