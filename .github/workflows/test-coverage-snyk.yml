@@ -1,0 +1,99 @@
+name: CI - Build, Test & JaCoCo
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  # 1) Análisis de seguridad con Snyk
+  snyk-scan:
+    name: Snyk Security Scan
+    runs-on: ubuntu-latest
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Tener Java disponible ayuda para proyectos Maven/Gradle
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Install Snyk CLI
+        run: npm install -g snyk
+
+      - name: Authenticate Snyk CLI
+        run: snyk auth "$SNYK_TOKEN"
+
+      # No bloquea el pipeline si encuentra vulns, pero deja exit code 0
+      - name: Snyk test (Java)
+        continue-on-error: true
+        run: snyk test --severity-threshold=high
+
+      # (Opcional) Registra el estado en el dashboard de Snyk
+      # - name: Snyk monitor
+      #   continue-on-error: true
+      #   run: snyk monitor
+
+      # Generar y subir reporte JSON de Snyk
+      - name: Generate Snyk JSON Report
+        if: always()
+        run: |
+          echo "Generando reporte JSON de Snyk..."
+          snyk test --json > snyk-report.json || echo "Falló snyk test, pero se continúa"
+          ls -lh snyk-report.json || echo "No se generó el reporte"
+
+      - name: Upload Snyk JSON Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-report
+          path: snyk-report.json
+          if-no-files-found: warn
+
+  # 2) Pruebas unitarias y cobertura JaCoCo
+  build-test-coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+          cache: maven
+
+      - name: Build & Test (with coverage)
+        run: mvn -B -U clean verify
+
+      - name: Upload JaCoCo report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-report
+          path: |
+            **/target/site/jacoco/**
+            **/target/site/jacoco-aggregate/**
+          if-no-files-found: ignore
+
+      - name: Publish JUnit test results
+        if: always()
+        uses: mikepenz/action-junit-report@v4
+        with:
+          report_paths: '**/target/surefire-reports/*.xml'
+          check_name: 'JUnit Results'
+          detailed_summary: true
