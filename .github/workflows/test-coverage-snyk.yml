@@ -35,6 +35,21 @@ jobs:
       - name: Authenticate Snyk CLI
         run: snyk auth "$SNYK_TOKEN"
 
+      - name: Debug Maven location
+        working-directory: backend
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 2 -name "pom.xml" -print
+          find . -maxdepth 1 -name "mvnw" -print || true
+
+      - name: Snyk test (Java)
+        working-directory: backend
+        continue-on-error: true
+        run: |
+          chmod +x mvnw || true
+          snyk test --severity-threshold=high
+
       # No bloquea el pipeline si encuentra vulns, pero deja exit code 0
       - name: Snyk test (Java)
         continue-on-error: true
