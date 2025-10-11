@@ -141,7 +141,7 @@ jobs:
         run: |
           mvn -B -U verify sonar:sonar \
             -Dsonar.organization=arkderr \
-            -Dsonar.projectKey=arkderr_2025TempDevops \
+            -Dsonar.projectKey=ArkDerr_2025TempDevops \
             -Dsonar.host.url=https://sonarcloud.io \
             -Dsonar.login=${SONAR_TOKEN} \
             -Dsonar.branch.name=${{ github.ref_name }} \
