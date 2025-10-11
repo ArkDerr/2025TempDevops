@@ -1,64 +1,65 @@
-name: CI - Build, Test & JaCoCo
+name: CI - Build, Test & JaCoCo                # Nombre visible del workflow en GitHub Actions
 
-on:
+on:                                           # Disparadores del workflow
   push:
-    branches: ["**"]
-  pull_request:
+    branches: ["**"]                          # Ejecuta en cualquier rama cuando hay push
+  pull_request:                               # Ejecuta en eventos de Pull Request (todas las ramas)
 
-permissions:
-  contents: read
-  checks: write
-  pull-requests: write
-  pages: write       # para publicar en Pages
-  id-token: write    # requerido por deploy-pages
+permissions:                                  # Permisos mínimos para los jobs (GHA fine-grained permissions)
+  contents: read                              # Leer contenido del repo
+  checks: write                               # Escribir resultados en "Checks"
+  pull-requests: write                        # Comentar / actualizar PRs
+  pages: write                                # (Opcional) publicar en GitHub Pages
+  id-token: write                             # Requerido para OIDC (deploy-pages u otros)
 
 env:
-  PROJECT_DIR: .   #cambia si tu pom.xml está en otra carpeta
+  PROJECT_DIR: .                              # Carpeta del proyecto (pom.xml). Cambia si está en un submódulo
 
-jobs:
-  snyk-scan:
+jobs:                                         # ---- COMIENZAN LOS JOBS ----
+
+  snyk-scan:                                  # Job 1: Análisis de vulnerabilidades con Snyk
     name: Snyk Security Scan (JSON)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest                    # Runner de Ubuntu
     env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}   # Token de Snyk tomado de Secrets del repo
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4             # Clona el código del repositorio
 
       - name: Setup JDK 21
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v4           # Instala JDK
         with:
-          distribution: temurin
-          java-version: 21
+          distribution: temurin               # Distribución Eclipse Temurin (OpenJDK)
+          java-version: 21                    # Versión de Java
 
       - name: Setup Snyk CLI
-        uses: snyk/actions/setup@master
+        uses: snyk/actions/setup@master       # Instala la CLI oficial de Snyk
 
       - name: Snyk auth
-        run: snyk auth "${SNYK_TOKEN}"
+        run: snyk auth "${SNYK_TOKEN}"        # Autentica la CLI de Snyk con el token
 
       - name: Snyk test → JSON
-        working-directory: ${{ env.PROJECT_DIR }}
-        continue-on-error: true
+        working-directory: ${{ env.PROJECT_DIR }} # Ejecuta desde la carpeta del proyecto
+        continue-on-error: true               # No rompe el pipeline aunque Snyk encuentre issues
         run: |
-          chmod +x ./mvnw || true
-          snyk test \
-            --file=pom.xml \
-            --package-manager=maven \
-            --severity-threshold=high \
-            --json-file-output=snyk-report.json
+          chmod +x ./mvnw || true             # Da permisos al wrapper Maven si existe
+          snyk test \                         # Escaneo Snyk (modo análisis de dependencias)
+            --file=pom.xml \                  # Indica el manifiesto Maven
+            --package-manager=maven \         # Forza PM Maven
+            --severity-threshold=high \       # Umbral mínimo a reportar: high
+            --json-file-output=snyk-report.json  # Guarda el resultado en JSON
 
       - name: Snyk summary
-        if: always()
+        if: always()                          # Corre siempre, falle o no el paso anterior
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          sudo apt-get update >/dev/null && sudo apt-get install -y jq >/dev/null
-          TOTAL=$(jq '.vulnerabilities | length' snyk-report.json 2>/dev/null || echo 0)
+          sudo apt-get update >/dev/null && sudo apt-get install -y jq >/dev/null  # Instala jq
+          TOTAL=$(jq '.vulnerabilities | length' snyk-report.json 2>/dev/null || echo 0)   # Total issues
           HIGH=$(jq '[.vulnerabilities[] | select(.severity=="high")] | length' snyk-report.json 2>/dev/null || echo 0)
           MED=$(jq '[.vulnerabilities[] | select(.severity=="medium")] | length' snyk-report.json 2>/dev/null || echo 0)
           LOW=$(jq '[.vulnerabilities[] | select(.severity=="low")] | length' snyk-report.json 2>/dev/null || echo 0)
-          {
+          {                                   # Publica un resumen bonito en el Job Summary
             echo "### Snyk Summary"
             echo ""
             echo "- Total: **$TOTAL**"
@@ -68,84 +69,83 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload Snyk JSON Report
-        if: always()
+        if: always()                          # Sube el artefacto aunque haya fallos
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-report
-          path: ${{ env.PROJECT_DIR }}/snyk-report.json
-          if-no-files-found: warn
+          name: snyk-report                   # Nombre del artefacto
+          path: ${{ env.PROJECT_DIR }}/snyk-report.json  # Ruta del JSON generado
+          if-no-files-found: warn             # Si no existe, solo advierte
 
-  build-test-coverage:
+  build-test-coverage:                        # Job 2: Compila, testea y genera cobertura (JaCoCo)
     name: Build, Test & JaCoCo
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 30                       # Límite de tiempo del job
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4 
+        uses: actions/checkout@v4             # Clona el repo
 
       - name: Setup JDK 21
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
-          cache: maven
+          cache: maven                        # Habilita caché del repositorio Maven (~/.m2)
 
       - name: Build & Test (with coverage)
-        run: mvn -B -U clean verify
+        run: mvn -B -U clean verify           # Compila, ejecuta tests y genera reportes (incluye JaCoCo si está en el POM)
+                                              # -B: batch mode, -U: fuerza actualizar snapshots
 
       - name: Upload JaCoCo report
-        if: always()
+        if: always()                          # Sube reportes aunque falle verify (útil para inspección)
         uses: actions/upload-artifact@v4
         with:
           name: jacoco-report
-          path: |
+          path: |                             # Directorios donde Maven deja los reportes de cobertura
             **/target/site/jacoco/**
             **/target/site/jacoco-aggregate/**
-          if-no-files-found: ignore
+          if-no-files-found: ignore           # Ignora si no existen (por ejemplo, proyecto single-module)
 
       - name: Publish JUnit test results
         if: always()
-        uses: mikepenz/action-junit-report@v4
+        uses: mikepenz/action-junit-report@v4 # Publica resultados JUnit en la pestaña "Checks"
         with:
-          report_paths: '**/target/surefire-reports/*.xml'
-          check_name: 'JUnit Results'
-          detailed_summary: true
+          report_paths: '**/target/surefire-reports/*.xml'  # XMLs generados por Surefire
+          check_name: 'JUnit Results'          # Nombre del check
+          detailed_summary: true               # Muestra resumen detallado
 
-  sonar-analysis:
+  sonar-analysis:                             # Job 3: Análisis estático con SonarCloud
     name: SonarCloud Analysis
     runs-on: ubuntu-latest
-    needs: build-test-coverage  # Se ejecuta después del job anterior
+    needs: build-test-coverage                # Se ejecuta después de compilar/testear
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v4             # Clona el repo para este job
 
       - name: Set up JDK 21
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v3           # (v3 también funciona; puedes unificar a v4 si quieres)
         with:
           distribution: 'temurin'
           java-version: '21'
 
       - name: Cache Maven dependencies
-        uses: actions/cache@v3
+        uses: actions/cache@v3                # Cache manual de ~/.m2 (opcional si ya usas cache:maven arriba)
         with:
           path: ~/.m2
-          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}  # Clave basada en OS + hash de POMs
           restore-keys: |
             ${{ runner.os }}-m2
 
       - name: Run SonarCloud Analysis
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Token SonarCloud desde Secrets
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Token de SonarCloud con permiso "Execute analysis"
         run: |
-          mvn -B -U verify sonar:sonar \
-            -Dsonar.organization=arkderr \
-            -Dsonar.projectKey=ArkDerr_2025TempDevops \
-            -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.login=${SONAR_TOKEN} \
-            -Dsonar.branch.name=${{ github.ref_name }} \
+          mvn -B -U verify sonar:sonar \      # Ejecuta build+tests y el goal sonar:sonar en una sola llamada
+            -Dsonar.organization=arkderr \    # Clave de tu organización en SonarCloud (ojo: suele ser minúscula)
+            -Dsonar.projectKey=ArkDerr_2025TempDevops \  # Project Key EXACTO de SonarCloud (sensible a mayúsculas)
+            -Dsonar.host.url=https://sonarcloud.io \     # URL del servidor SonarCloud
+            -Dsonar.login=${SONAR_TOKEN} \    # Token pasado como parámetro de login
+            -Dsonar.branch.name=${{ github.ref_name }} \ # Publica el análisis con el nombre de la rama actual
             -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
-
-            
- 
+                                                  # Ruta del reporte XML de JaCoCo para calcular "Coverage"
