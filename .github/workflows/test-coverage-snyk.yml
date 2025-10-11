@@ -9,15 +9,15 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
+  # security-events: write   # ← solo si luego subes SARIF a Code Scanning
 
 jobs:
-  # 1) Análisis de seguridad con Snyk
+  # 1) Análisis de seguridad con Snyk (acción oficial)
   snyk-scan:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      PROJECT_DIR: .   # pom.xml está en la raíz
 
     steps:
       - name: Checkout
@@ -29,31 +29,18 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      - name: Install Snyk CLI
-        run: npm install -g snyk
-
-      - name: Authenticate Snyk CLI
-        run: snyk auth "$SNYK_TOKEN"
-
-      - name: Debug project layout
-        run: |
-          pwd
-          ls -la
-          find . -maxdepth 2 -name "pom.xml" -print
-          find . -maxdepth 2 -name "mvnw" -print || true
-
-      # Escaneo de seguridad Maven
-      - name: Snyk test (Java)
-        continue-on-error: true
-        run: snyk test --file="pom.xml" --package-manager=maven --severity-threshold=high
-
-      # Generar y subir reporte JSON de Snyk
-      - name: Generate Snyk JSON Report
-        if: always()
-        run: |
-          echo "Generando reporte JSON de Snyk..."
-          snyk test --json --file="pom.xml" --package-manager=maven > snyk-report.json || echo "Falló snyk test, pero se continúa"
-          ls -lh snyk-report.json || echo "No se generó el reporte"
+      # Ejecuta Snyk sobre Maven usando la acción oficial
+      - name: Snyk Maven test (official action)
+        uses: snyk/actions/maven@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          command: test
+          # No falla el pipeline por vulnerabilidades y genera JSON directo
+          args: --severity-threshold=high --json-file-output=snyk-report.json
+          sarif: false          # pon true si necesitas SARIF
+          monitorWhen: never    # usa 'always' si quieres registrar en dashboard
+          failOn: none          # evita fallar el job por vulns
 
       - name: Upload Snyk JSON Report
         if: always()
