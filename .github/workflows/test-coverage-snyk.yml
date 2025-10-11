@@ -63,31 +63,34 @@ jobs:
           if-no-files-found: error         # falla si no existe (más claro)
 
   publish-snyk-report:
-    name: Publish Snyk HTML to GitHub Pages
-    needs: snyk-scan
-    if: always()
-    runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
-    steps:
-      - name: Download Snyk HTML artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: snyk-html-report
-          path: ./public
+      name: Publish Snyk HTML to GitHub Pages
+      needs: snyk-scan
+      if: always() && ${{ github.event.repository.fork == false }}   # evita fallar en forks
+      runs-on: ubuntu-latest
+      environment:
+        name: github-pages
+        url: ${{ steps.deploy.outputs.page_url }}
+      steps:
+        - name: Download Snyk HTML artifact
+          uses: actions/download-artifact@v4
+          with:
+            name: snyk-html-report
+            path: ./public
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+        - name: Configure Pages
+          uses: actions/configure-pages@v5
+          with:
+            enablement: true           # habilita Pages si no existe
 
-      - name: Upload Pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./public
+        - name: Upload Pages artifact
+          uses: actions/upload-pages-artifact@v3
+          with:
+            path: ./public
 
-      - name: Deploy to GitHub Pages
-        id: deploy
-        uses: actions/deploy-pages@v4
+        - name: Deploy to GitHub Pages
+          id: deploy
+          uses: actions/deploy-pages@v4
+
 
 
 
