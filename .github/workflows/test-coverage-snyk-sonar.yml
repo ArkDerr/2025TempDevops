@@ -140,8 +140,9 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}  # Token SonarCloud desde Secrets
         run: |
           mvn verify sonar:sonar \
-            -Dsonar.projectKey=nombreOrganizacion_NombreProyecto \
-            -Dsonar.organization=nombreOrganizacion \
+            -Dsonar.projectKey=arkderr_2025TempDevops \
+            -Dsonar.organization=arkderr \
             -Dsonar.host.url=https://sonarcloud.io \
-            -Dsonar.login=${SONAR_TOKEN}
+            -Dsonar.login=${SONAR_TOKEN} \
+            -Dsonar.coverage.jacoco.xmlReportPaths=target/site/jacoco/jacoco.xml
  
