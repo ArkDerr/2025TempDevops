@@ -9,12 +9,12 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
-  # security-events: write   # (solo si luego subes SARIF a Code Scanning)
+  security-events: write
 
 jobs:
   # 1) Análisis de seguridad con Snyk (CLI, ejecutando en app/)
   snyk-scan:
-    name: Snyk Security Scan
+    name: Snyk Security Scan (SARIF)
     runs-on: ubuntu-latest
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -29,52 +29,28 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # Instala la CLI oficial de Snyk (más fiable que npm -g)
       - name: Setup Snyk CLI
         uses: snyk/actions/setup@master
 
-      # Pre-flight: habilita mvnw si existe y valida dependency:tree
-      - name: Preflight Maven (wrapper + dependency:tree)
-        run: |
-          if [ -f ./mvnw ]; then
-            chmod +x ./mvnw || true
-            ./mvnw -v
-            ./mvnw dependency:tree -DoutputType=dot -B -N -f pom.xml
-          else
-            mvn -v
-            mvn dependency:tree -DoutputType=dot -B -N -f pom.xml
-          fi
+      - name: Snyk auth
+        run: snyk auth "${SNYK_TOKEN}"
 
-      - name: Authenticate Snyk CLI
-        run: snyk auth "$SNYK_TOKEN"
-
-      # No bloquea el pipeline por vulnerabilidades
-      - name: Snyk test (Java)
+      # Genera SARIF (no rompe el job si encuentra vulns)
+      - name: Snyk test → SARIF
         continue-on-error: true
         run: |
           snyk test \
             --file=pom.xml \
             --package-manager=maven \
-            --severity-threshold=high
+            --severity-threshold=high \
+            --sarif-file-output=snyk-report.sarif
 
-      # Generar y subir reporte JSON de Snyk
-      - name: Generate Snyk JSON Report
-        if: always()
-        run: |
-          echo "Generando reporte JSON de Snyk..."
-          snyk test \
-            --file=pom.xml \
-            --package-manager=maven \
-            --json > snyk-report.json || echo "Falló snyk test, pero se continúa"
-          ls -lh snyk-report.json || echo "No se generó el reporte"
-
-      - name: Upload Snyk JSON Report
-        if: always()
-        uses: actions/upload-artifact@v4
+      # Sube a Security → Code scanning alerts
+      - name: Upload SARIF to Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
         with:
-          name: snyk-report
-          path: snyk-report.json
-          if-no-files-found: warn
+          sarif_file: snyk-report.sarif
+
 
   # 2) Pruebas unitarias y cobertura JaCoCo (ejecutando en app/)
   build-test-coverage: # Nombre del job
