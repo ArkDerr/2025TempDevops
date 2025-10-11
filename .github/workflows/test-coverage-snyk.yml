@@ -9,10 +9,10 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
-  # security-events: write   # ← solo si luego subes SARIF a Code Scanning
+  # security-events: write   # (solo si luego subes SARIF a Code Scanning)
 
 jobs:
-  # 1) Análisis de seguridad con Snyk (acción oficial)
+  # 1) Análisis de seguridad con Snyk (CLI, ejecutando en app/)
   snyk-scan:
     name: Snyk Security Scan
     runs-on: ubuntu-latest
@@ -29,28 +29,32 @@ jobs:
           distribution: temurin
           java-version: 21
 
-      # Ejecuta Snyk sobre Maven usando la acción oficial
-      - name: Snyk Maven test (official action)
-        uses: snyk/actions/maven@master
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          command: test
-          # No falla el pipeline por vulnerabilidades y genera JSON directo
-          args: --severity-threshold=high --json-file-output=snyk-report.json
-          sarif: false          # pon true si necesitas SARIF
-          monitorWhen: never    # usa 'always' si quieres registrar en dashboard
-          failOn: none          # evita fallar el job por vulns
+      # Instala la CLI de Snyk
+      - name: Setup Snyk CLI
+        uses: snyk/actions/setup@master
+
+      # Ejecuta Snyk desde la carpeta 'app'
+      - name: Snyk test (CLI en app/)
+        working-directory: app
+        continue-on-error: true
+        run: |
+          chmod +x ./mvnw || true
+          snyk auth "${SNYK_TOKEN}"
+          snyk test \
+            --file=pom.xml \
+            --package-manager=maven \
+            --severity-threshold=high \
+            --json-file-output=snyk-report.json
 
       - name: Upload Snyk JSON Report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: snyk-report
-          path: snyk-report.json
+          path: app/snyk-report.json
           if-no-files-found: warn
 
-  # 2) Pruebas unitarias y cobertura JaCoCo
+  # 2) Pruebas unitarias y cobertura JaCoCo (ejecutando en app/)
   build-test-coverage:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -67,7 +71,10 @@ jobs:
           cache: maven
 
       - name: Build & Test (with coverage)
-        run: mvn -B -U clean verify
+        working-directory: app
+        run: |
+          chmod +x ./mvnw || true
+          ./mvnw -B -U clean verify
 
       - name: Upload JaCoCo report
         if: always()
@@ -75,14 +82,14 @@ jobs:
         with:
           name: jacoco-report
           path: |
-            **/target/site/jacoco/**
-            **/target/site/jacoco-aggregate/**
+            app/target/site/jacoco/**
+            app/target/site/jacoco-aggregate/**
           if-no-files-found: ignore
 
       - name: Publish JUnit test results
         if: always()
         uses: mikepenz/action-junit-report@v4
         with:
-          report_paths: '**/target/surefire-reports/*.xml'
+          report_paths: 'app/target/surefire-reports/*.xml'
           check_name: 'JUnit Results'
           detailed_summary: true
