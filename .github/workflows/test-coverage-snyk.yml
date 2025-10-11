@@ -9,12 +9,13 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
-  security-events: write
+  pages: write       # ⬅️ para publicar en Pages
+  id-token: write    # ⬅️ requerido por deploy-pages
 
 jobs:
   # 1) Análisis de seguridad con Snyk (CLI, ejecutando en app/)
   snyk-scan:
-    name: Snyk Security Scan (SARIF)
+    name: Snyk Security Scan (HTML)
     runs-on: ubuntu-latest
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -35,21 +36,53 @@ jobs:
       - name: Snyk auth
         run: snyk auth "${SNYK_TOKEN}"
 
-      # Genera SARIF (no rompe el job si encuentra vulns)
-      - name: Snyk test → SARIF
+      # Ejecuta Snyk y genera JSON (no rompe el pipeline por vulnerabilidades)
+      - name: Snyk test (JSON)
+        working-directory: ${{ env.PROJECT_DIR }}
         continue-on-error: true
         run: |
+          # si tienes mvnw en el dir del proyecto, asegúrate de permisos (no hace daño si no existe)
+          chmod +x ./mvnw || true
           snyk test \
             --file=pom.xml \
             --package-manager=maven \
             --severity-threshold=high \
-            --sarif-file-output=snyk-report.sarif
+            --json > snyk-report.json
 
-      # Sube a Security → Code scanning alerts
-      - name: Upload SARIF to Code Scanning
-        uses: github/codeql-action/upload-sarif@v3
+      # Convierte JSON → HTML bonito
+      - name: Install snyk-to-html
+        run: npm install -g snyk-to-html
+
+      - name: Convert JSON to HTML
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: snyk-to-html -i snyk-report.json -o snyk-report.html
+
+      # Sube el HTML como artefacto descargable del workflow
+      - name: Upload Snyk HTML Report
+        uses: actions/upload-artifact@v4
         with:
-          sarif_file: snyk-report.sarif
+          name: snyk-html-report
+          path: ${{ env.PROJECT_DIR }}/snyk-report.html
+          if-no-files-found: warn
+
+  publish-snyk-report:
+    name: Publish Snyk HTML to GitHub Pages
+    needs: snyk-scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Snyk HTML artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: snyk-html-report
+          path: ./public
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./public
+
+      - name: Deploy to GitHub Pages
+        uses: actions/deploy-pages@v4
 
 
   # 2) Pruebas unitarias y cobertura JaCoCo (ejecutando en app/)
