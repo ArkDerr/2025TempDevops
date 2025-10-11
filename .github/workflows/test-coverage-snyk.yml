@@ -9,11 +9,13 @@ permissions:
   contents: read
   checks: write
   pull-requests: write
-  pages: write       # ⬅️ para publicar en Pages
-  id-token: write    # ⬅️ requerido por deploy-pages
+  pages: write       # para publicar en Pages
+  id-token: write    # requerido por deploy-pages
+
+env:
+  PROJECT_DIR: .
 
 jobs:
-  # 1) Análisis de seguridad con Snyk (CLI, ejecutando en app/)
   snyk-scan:
     name: Snyk Security Scan (HTML)
     runs-on: ubuntu-latest
@@ -21,11 +23,9 @@ jobs:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup JDK 21
-        uses: actions/setup-java@v4
+      - uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
@@ -36,20 +36,18 @@ jobs:
       - name: Snyk auth
         run: snyk auth "${SNYK_TOKEN}"
 
-      # Ejecuta Snyk y genera JSON (no rompe el pipeline por vulnerabilidades)
       - name: Snyk test (JSON)
         working-directory: ${{ env.PROJECT_DIR }}
         continue-on-error: true
         run: |
-          # si tienes mvnw en el dir del proyecto, asegúrate de permisos (no hace daño si no existe)
           chmod +x ./mvnw || true
           snyk test \
             --file=pom.xml \
             --package-manager=maven \
             --severity-threshold=high \
             --json > snyk-report.json
+          test -s snyk-report.json || echo '{}' > snyk-report.json  # evita fallo si está vacío
 
-      # Convierte JSON → HTML bonito
       - name: Install snyk-to-html
         run: npm install -g snyk-to-html
 
@@ -57,18 +55,21 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: snyk-to-html -i snyk-report.json -o snyk-report.html
 
-      # Sube el HTML como artefacto descargable del workflow
       - name: Upload Snyk HTML Report
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-html-report
+          name: snyk-html-report           # ESTE nombre se usa luego al descargar
           path: ${{ env.PROJECT_DIR }}/snyk-report.html
-          if-no-files-found: warn
+          if-no-files-found: error         # falla si no existe (más claro)
 
   publish-snyk-report:
     name: Publish Snyk HTML to GitHub Pages
     needs: snyk-scan
+    if: always()
     runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - name: Download Snyk HTML artifact
         uses: actions/download-artifact@v4
@@ -76,13 +77,18 @@ jobs:
           name: snyk-html-report
           path: ./public
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: ./public
 
       - name: Deploy to GitHub Pages
+        id: deploy
         uses: actions/deploy-pages@v4
+
 
 
   # 2) Pruebas unitarias y cobertura JaCoCo (ejecutando en app/)
