@@ -13,19 +13,21 @@ permissions:
   id-token: write    # requerido por deploy-pages
 
 env:
-  PROJECT_DIR: .
+  PROJECT_DIR: .   # ⬅️ cambia si tu pom.xml está en otra carpeta
 
 jobs:
   snyk-scan:
-    name: Snyk Security Scan (HTML)
+    name: Snyk Security Scan (JSON)
     runs-on: ubuntu-latest
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
+      - name: Setup JDK 21
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: 21
@@ -36,7 +38,8 @@ jobs:
       - name: Snyk auth
         run: snyk auth "${SNYK_TOKEN}"
 
-      - name: Snyk test (JSON)
+      # Ejecuta Snyk en la carpeta del proyecto y genera JSON (sin romper el pipeline)
+      - name: Snyk test → JSON
         working-directory: ${{ env.PROJECT_DIR }}
         continue-on-error: true
         run: |
@@ -45,54 +48,35 @@ jobs:
             --file=pom.xml \
             --package-manager=maven \
             --severity-threshold=high \
-            --json > snyk-report.json
-          test -s snyk-report.json || echo '{}' > snyk-report.json  # evita fallo si está vacío
+            --json-file-output=snyk-report.json
 
-      - name: Install snyk-to-html
-        run: npm install -g snyk-to-html
-
-      - name: Convert JSON to HTML
+      # (Opcional) Resumen rápido en el Job Summary
+      - name: Snyk summary
+        if: always()
         working-directory: ${{ env.PROJECT_DIR }}
-        run: snyk-to-html -i snyk-report.json -o snyk-report.html
+        run: |
+          sudo apt-get update >/dev/null && sudo apt-get install -y jq >/dev/null
+          TOTAL=$(jq '.vulnerabilities | length' snyk-report.json 2>/dev/null || echo 0)
+          HIGH=$(jq '[.vulnerabilities[] | select(.severity=="high")] | length' snyk-report.json 2>/dev/null || echo 0)
+          MED=$(jq '[.vulnerabilities[] | select(.severity=="medium")] | length' snyk-report.json 2>/dev/null || echo 0)
+          LOW=$(jq '[.vulnerabilities[] | select(.severity=="low")] | length' snyk-report.json 2>/dev/null || echo 0)
+          {
+            echo "### Snyk Summary"
+            echo ""
+            echo "- Total: **$TOTAL**"
+            echo "- High: **$HIGH**"
+            echo "- Medium: **$MED**"
+            echo "- Low: **$LOW**"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Upload Snyk HTML Report
+      # Sube el JSON como artefacto descargable
+      - name: Upload Snyk JSON Report
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-html-report           # ESTE nombre se usa luego al descargar
-          path: ${{ env.PROJECT_DIR }}/snyk-report.html
-          if-no-files-found: error         # falla si no existe (más claro)
-
-  publish-snyk-report:
-      name: Publish Snyk HTML to GitHub Pages
-      needs: snyk-scan
-      if: always() && ${{ github.event.repository.fork == false }}   # evita fallar en forks
-      runs-on: ubuntu-latest
-      environment:
-        name: github-pages
-        url: ${{ steps.deploy.outputs.page_url }}
-      steps:
-        - name: Download Snyk HTML artifact
-          uses: actions/download-artifact@v4
-          with:
-            name: snyk-html-report
-            path: ./public
-
-        - name: Configure Pages
-          uses: actions/configure-pages@v5
-          with:
-            enablement: true           # habilita Pages si no existe
-
-        - name: Upload Pages artifact
-          uses: actions/upload-pages-artifact@v3
-          with:
-            path: ./public
-
-        - name: Deploy to GitHub Pages
-          id: deploy
-          uses: actions/deploy-pages@v4
-
-
-
+          name: snyk-report
+          path: ${{ env.PROJECT_DIR }}/snyk-report.json
+          if-no-files-found: warn
 
   # 2) Pruebas unitarias y cobertura JaCoCo (ejecutando en app/)
   build-test-coverage: # Nombre del job
